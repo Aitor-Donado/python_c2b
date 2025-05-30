@@ -1,202 +1,314 @@
-from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
-class MaterialBiblioteca(ABC):
-    def __init__(self, titulo, codigo_inventario, ubicacion):
-        self.titulo = titulo
-        self.__ubicacion = ubicacion
-        self.codigo_inventario = codigo_inventario
-        self.disponible = True
+from datetime import date, timedelta
 
-    @property
-    def ubicacion(self):
-        print(f"Tienes permiso para ver la ubicacion del item '{self.titulo}'.")
-        return self.__ubicacion
-    
-    @ubicacion.setter
-    def ubicacion(self, nueva_ubicacion):
-        print(f"Compruebo que la ubicación está disponible para el item '{self.titulo}'.")
-        self.__ubicacion = nueva_ubicacion
+from base import LibroDB, RevistaDB, DvdDB, UsuarioDB, PrestamoDB, crear_tablas, Session
+from clases import Libro, Revista, DVD, Usuario
+from helpers import (
+    libro_a_db, db_a_libro,
+    revista_a_db, db_a_revista,
+    dvd_a_db, db_a_dvd,
+    usuario_a_db, db_a_usuario
+)
 
-    def trasladar(self, nueva_ubicacion):
-        self.ubicacion = nueva_ubicacion
-        print(f"El item '{self.titulo}' ha sido trasladado a '{nueva_ubicacion}'.")
+# === Libro ===
+def agregar_libro():
+    print("\n== Agregar Libro ==")
+    titulo = input("Título: ")
+    codigo = input("Código de inventario: ")
+    autor = input("Autor: ")
+    isbn = input("ISBN: ")
+    paginas = int(input("Número de páginas: "))
 
-    def prestar(self):
-        if self.disponible:
-            self.disponible = False
-            print(f"El item '{self.titulo}' ha sido prestado.")
+    libro = Libro(titulo, codigo, autor, isbn, paginas)
+    libro_db = libro_a_db(libro)
+
+    with Session() as session:
+        session.add(libro_db)
+        session.commit()
+    print("✅ Libro guardado.")
+
+def mostrar_libros():
+    print("\n== Lista de Libros ==")
+    with Session() as session:
+        libros_db = session.query(LibroDB).all()
+        for ldb in libros_db:
+            db_a_libro(ldb).mostrar_info()
+
+# === Revista ===
+def agregar_revista():
+    print("\n== Agregar Revista ==")
+    titulo = input("Título: ")
+    codigo = input("Código de inventario: ")
+    numero = input("Número de edición: ")
+    fecha = input("Fecha de publicación (YYYY-MM-DD): ")
+
+    revista = Revista(titulo, codigo, numero, fecha)
+    revista_db = revista_a_db(revista)
+
+    with Session() as session:
+        session.add(revista_db)
+        session.commit()
+    print("✅ Revista guardada.")
+
+def mostrar_revistas():
+    print("\n== Lista de Revistas ==")
+    with Session() as session:
+        revistas_db = session.query(RevistaDB).all()
+        for rdb in revistas_db:
+            db_a_revista(rdb).mostrar_info()
+
+# === DVD ===
+def agregar_dvd():
+    print("\n== Agregar DVD ==")
+    titulo = input("Título: ")
+    codigo = input("Código de inventario: ")
+    director = input("Director: ")
+    duracion = int(input("Duración (minutos): "))
+
+    dvd = DVD(titulo, codigo, director, duracion)
+    dvd_db = dvd_a_db(dvd)
+
+    with Session() as session:
+        session.add(dvd_db)
+        session.commit()
+    print("✅ DVD guardado.")
+
+def mostrar_dvds():
+    print("\n== Lista de DVDs ==")
+    with Session() as session:
+        dvds_db = session.query(DvdDB).all()
+        for ddb in dvds_db:
+            db_a_dvd(ddb).mostrar_info()
+
+# === Usuario ===
+def agregar_usuario():
+    print("\n== Agregar Usuario ==")
+    nombre = input("Nombre: ")
+    id_usuario = input("ID de usuario: ")
+
+    usuario = Usuario(nombre, id_usuario)
+    usuario_db = usuario_a_db(usuario)
+
+    with Session() as session:
+        session.add(usuario_db)
+        session.commit()
+    print("✅ Usuario guardado.")
+
+def mostrar_usuarios():
+    print("\n== Lista de Usuarios ==")
+    with Session() as session:
+        usuarios_db = session.query(UsuarioDB).all()
+        for udb in usuarios_db:
+            db_a_usuario(udb)
+            print(f"{udb.id_usuario} - {udb.nombre}")
+
+def prestar_material():
+    codigo = input("Código del material a prestar: ")
+    id_usuario = input("ID del usuario: ")
+
+    with Session() as session:
+        # Шукаємо книгу
+        material_db = session.query(LibroDB).filter_by(codigo_inventario=codigo).first()
+        tipo_material = "Libro"
+
+        # Якщо не знайшли книгу, шукаємо журнал
+        if not material_db:
+            material_db = session.query(RevistaDB).filter_by(codigo_inventario=codigo).first()
+            tipo_material = "Revista"
+
+        # Якщо не знайшли журнал, шукаємо DVD
+        if not material_db:
+            material_db = session.query(DvdDB).filter_by(codigo_inventario=codigo).first()
+            tipo_material = "DVD"
+
+        if not material_db:
+            print("❌ Material no encontrado.")
+            return
+
+        if not material_db.disponible:
+            print("⚠️ El material no está disponible.")
+            return
+
+        # Створення позики
+        prestamo = PrestamoDB(
+            codigo_inventario=material_db.codigo_inventario,
+            id_usuario=id_usuario,
+            fecha_prestamo=date.today(),
+            fecha_devolucion=date.today() + timedelta(days=14)
+        )
+        session.add(prestamo)
+
+        # Оновлення статусу матеріалу
+        material_db.disponible = False
+        session.commit()
+
+        print(f"✅ {tipo_material} prestado hasta {prestamo.fecha_devolucion}")
+
+def eliminar_material():
+    print("\n== Eliminar Material ==")
+    codigo = input("Código del material a eliminar: ")
+
+    with Session() as session:
+        material = (
+            session.query(LibroDB).filter_by(codigo_inventario=codigo).first()
+            or session.query(RevistaDB).filter_by(codigo_inventario=codigo).first()
+            or session.query(DvdDB).filter_by(codigo_inventario=codigo).first()
+        )
+
+        if not material:
+            print("❌ Material no encontrado.")
+            return
+
+        session.delete(material)
+        session.commit()
+        print("✅ Material eliminado correctamente.")
+
+def editar_material():
+    print("\n== Editar Material ==")
+    codigo = input("Código del material a editar: ")
+
+    with Session() as session:
+        libro = session.query(LibroDB).filter_by(codigo_inventario=codigo).first()
+        if libro:
+            print(f"📘 Editando Libro: {libro.titulo}")
+            libro.titulo = input(f"Título [{libro.titulo}]: ") or libro.titulo
+            libro.autor = input(f"Autor [{libro.autor}]: ") or libro.autor
+            libro.isbn = input(f"ISBN [{libro.isbn}]: ") or libro.isbn
+            paginas = input(f"Número de páginas [{libro.paginas}]: ")
+            libro.paginas = int(paginas) if paginas else libro.paginas
+
         else:
-            print(f"El item '{self.titulo}' no está disponible.")
+            revista = session.query(RevistaDB).filter_by(codigo_inventario=codigo).first()
+            if revista:
+                print(f"📰 Editando Revista: {revista.titulo}")
+                revista.titulo = input(f"Título [{revista.titulo}]: ") or revista.titulo
+                revista.numero = input(f"Número [{revista.numero}]: ") or revista.numero
+                fecha = input(f"Fecha de publicación [{revista.fecha_publicacion}]: ")
+                revista.fecha_publicacion = fecha or revista.fecha_publicacion
 
-    def devolver(self):
-        self.disponible = True
-        print(f"El item '{self.titulo}' ha sido devuelto.")
-    
-    @abstractmethod
-    def mostrar_info(self):
-        print(f"Título: {self.titulo}")
-        print(f"Código de inventario: {self.codigo_inventario}")
-        print(f"Ubicación: {self.ubicacion}")
-        print(f"Disponible: {'Sí' if self.disponible else 'No'}")
+            else:
+                dvd = session.query(DvdDB).filter_by(codigo_inventario=codigo).first()
+                if dvd:
+                    print(f"💿 Editando DVD: {dvd.titulo}")
+                    dvd.titulo = input(f"Título [{dvd.titulo}]: ") or dvd.titulo
+                    dvd.director = input(f"Director [{dvd.director}]: ") or dvd.director
+                    duracion = input(f"Duración (min) [{dvd.duracion}]: ")
+                    dvd.duracion = int(duracion) if duracion else dvd.duracion
+                else:
+                    print("❌ Material no encontrado.")
+                    return
 
-
-class Libro(MaterialBiblioteca):
-    def __init__(self, titulo, codigo_inventario, autor, isbn, numero_paginas):
-        super().__init__(titulo, codigo_inventario, ubicacion=None)
-        self.autor = autor
-        self.numero_paginas = numero_paginas
-        self.isbn = isbn
-    
-    def mostrar_info(self):
-        super().mostrar_info()
-        print(f"Autor: {self.autor}")
-        print(f"ISBN: {self.isbn}")
-        print(f"Número de páginas: {self.numero_paginas}")
+        session.commit()
+        print("✅ Cambios guardados correctamente.")
 
 
-class Revista(MaterialBiblioteca):
-    def __init__(self, titulo, codigo_inventario, fecha_publicacion, numero_edicion):
-        super().__init__(titulo, codigo_inventario, ubicacion=None)
-        self.numero_edicion = numero_edicion
-        self.fecha_publicacion = fecha_publicacion
-    
-    def mostrar_info(self):
-        super().mostrar_info()
-        print(f"Número: {self.numero_edicion}")
-        print(f"Fecha de publicación: {self.fecha_publicacion}")
+def mostrar_todos_los_materiales():
+    with Session() as session:
+        print("\n📚 == Libros ==")
+        for libro in session.query(LibroDB).all():
+            print(f"📘 [{libro.codigo_inventario}] {libro.titulo} — {libro.autor}  | Disponible: {'Si' if libro.disponible else 'No'}")
 
-class DVD(MaterialBiblioteca):
-    def __init__(self, titulo, codigo_inventario, duracion, director):
-        super().__init__(titulo, codigo_inventario, ubicacion=None)
-        self.duracion = duracion
-        self.director = director
-    
-    def mostrar_info(self):
-        super().mostrar_info()
-        print(f"Duración: {self.duracion} minutos")
-        print(f"Director: {self.director}")
+        print("\n📰 == Revistas ==")
+        for revista in session.query(RevistaDB).all():
+            print(f"🗞️ [{revista.codigo_inventario}] {revista.titulo} — №{revista.numero} | Disponible: {'Si' if revista.disponible else 'No'}")
 
-import uuid
-class Usuario:
-    def __init__(self, nombre, apellido):
-        self.nombre = nombre
-        self.apellido = apellido
-        self.id_usuario = uuid.uuid4().hex[:6].upper()  # Genera un ID único
-    
-    def mostrar_info(self):
-        print(f"{self.nombre} {self.apellido} ID Usuario: {self.id_usuario}")
+        print("\n💿 == DVD ==")
+        for dvd in session.query(DvdDB).all():
+            print(f"💽 [{dvd.codigo_inventario}] {dvd.titulo} — {dvd.director}  | Disponible: {'Si' if dvd.disponible else 'No'}")
 
-class Prestamo:
-    def __init__(self, id_usuario, id_material):
-        self.id_usuario = id_usuario
-        self.id_material = id_material
-        self.fecha_prestamo = datetime.now()
-        self.fecha_devolucion = datetime.now() + timedelta(days=14)  # 2 semanas de préstamo   
+def devolver_material():
+    print("\n== Devolver Material ==")
+    codigo = input("Código del material: ")
+    id_usuario = input("ID del usuario: ")
 
-    def mostrar_info(self):
-        print(f"Usuario: {self.id_usuario}")
-        print(f"Material: {self.id_material}")
-        print(f"Fecha de préstamo: {self.fecha_prestamo}")
-        print(f"Fecha de devolución: {self.fecha_devolucion}")
+    with Session() as session:
+        # Шукаємо останній активний (не повернутий) запис про позику
+        prestamo = (
+            session.query(PrestamoDB)
+            .filter_by(codigo_inventario=codigo, id_usuario=id_usuario)
+            .filter(PrestamoDB.fecha_devolucion_real.is_(None))  # не повернений
+            .first()
+        )
 
+        if not prestamo:
+            print("❌ No se encontró préstamo activo para este material y usuario.")
+            return
 
+        # Повертаємо матеріал00
+        prestamo.fecha_devolucion_real = date.today()
 
+        # Оновлюємо статус у відповідній таблиці
+        material = (
+            session.query(LibroDB).filter_by(codigo_inventario=codigo).first()
+            or session.query(RevistaDB).filter_by(codigo_inventario=codigo).first()
+            or session.query(DvdDB).filter_by(codigo_inventario=codigo).first()
+        )
 
-import pickle
-class GestorBiblioteca:
-    def __init__(self):
-        self.materiales = self.cargar_materiales()
-        self.usuarios = self.cargar_usuarios()
-        self.prestamos = self.cargar_prestamos()
-    
-    def almacenar_materiales(self):
-        with open("materiales_biblioteca.pkl", "wb") as archivo:
-            pickle.dump(self.materiales, archivo)
-    
-    def almacenar_usuarios(self):
-        with open("usuarios_biblioteca.pkl", "wb") as archivo:
-            pickle.dump(self.usuarios, archivo)
+        if material:
+            material.disponible = True
 
-    def almacenar_prestamos(self):
-        with open("prestamos_biblioteca.pkl", "wb") as archivo:
-            pickle.dump(self.prestamos, archivo)
+        session.commit()
+        print("✅ Material devuelto correctamente.")
+def historial_prestamos():
+    print("\n== Historial de Préstamos ==")
+    with Session() as session:
+        prestamos = session.query(PrestamoDB).all()
+        for p in prestamos:
+            devuelto = p.fecha_devolucion_real or "⏳ No devuelto"
+            print(f"📚 {p.codigo_inventario} | 👤 {p.id_usuario} | 📅 {p.fecha_prestamo} → {p.fecha_devolucion} | 🔄 {devuelto}")
 
-    def cargar_materiales(self):
-        try:
-            materiales = pickle.load(open("materiales_biblioteca.pkl", "rb"))
-            print("Materiales cargados desde el archivo.")
-            return materiales
-        except FileNotFoundError:
-            print("No se encontró el archivo de materiales.")
-            return []
-    
-    def cargar_usuarios(self):
-        try:
-            usuarios = pickle.load(open("usuarios_biblioteca.pkl", "rb"))
-            print("Usuarios cargados desde el archivo.")
-            return usuarios
-        except FileNotFoundError:
-            print("No se encontró el archivo de usuarios.")
-            return []
-        
-
-    def cargar_prestamos(self):
-        try:
-            prestamos = pickle.load(open("prestamos_biblioteca.pkl", "rb"))
-            print("Prestamos cargados desde el archivo.")
-            return prestamos
-        except FileNotFoundError:
-            print("No se encontró el archivo de prestamos.")
-            return []
-
-    def agregar_material(self, material):
-        self.materiales.append(material)
-        self.almacenar_materiales()
-
-    def agregar_usuario(self, usuario):
-        self.usuarios.append(usuario)
-        self.almacenar_usuarios()
-    
-    def agregar_prestamo(self, prestamo):
-        self.prestamos.append(prestamo)
-        self.almacenar_prestamos()
-
-    def borrar_material(self, codigo_inventario):
-        borrables = [material for material in self.materiales if material.codigo_inventario == codigo_inventario]
-        print("¿Está seguro de querer borrar estos materiales?")
-        for material in borrables:
-            material.mostrar_info()
-        confirmacion = input("Ingrese 'si' para confirmar: ")
-        if confirmacion.lower() == 'si':
-            for material in borrables:
-                self.materiales.remove(material)
-            print("Materiales borrados.")
-        self.almacenar_materiales()
-
-    def mostrar_materiales(self):
-        for material in self.materiales:
-            material.mostrar_info()
-
-    def mostrar_usuarios(self):
-        for usuario in self.usuarios:
-            usuario.mostrar_info()
-    
-    def buscar_material(self, codigo_inventario):
-        for material in self.materiales:
-            if material.codigo_inventario == codigo_inventario:
-                material.mostrar_info()
-                return
-        print("Material no encontrado.") 
-
-    def prestar_material(self, id_usuario, id_material):
-        usuario = next((u for u in self.usuarios if u.id_usuario == id_usuario), None)
-        material = next((m for m in self.materiales if m.codigo_inventario == id_material), None)
-        if usuario and material:
-            prestamo = Prestamo(usuario, material)
-            self.agregar_prestamo(prestamo)
+# === Menú principal ===
+def menu():
+    crear_tablas()
+    while True:
+        print("\n==== Menú principal ====")
+        print("1. Agregar libro")
+        print("2. Mostrar libros")
+        print("3. Agregar revista")
+        print("4. Mostrar revistas")
+        print("5. Agregar DVD")
+        print("6. Mostrar DVDs")
+        print("7. Agregar usuario")
+        print("8. Mostrar usuarios")
+        print("9. Prestar material")
+        print("10. Mostrar estado de todos los materiales")
+        print("11. Devolver material")
+        print("12. Historial de préstamos")
+        print("13. Editar material")
+        print("14. Eliminar material")
+        print("0. Salir")
+        opcion = input("Elige una opción: ")
+        if opcion == "1":
+            agregar_libro()
+        elif opcion == "2":
+            mostrar_libros()
+        elif opcion == "3":
+            agregar_revista()
+        elif opcion == "4":
+            mostrar_revistas()
+        elif opcion == "5":
+            agregar_dvd()
+        elif opcion == "6":
+            mostrar_dvds()
+        elif opcion == "7":
+            agregar_usuario()
+        elif opcion == "8":
+            mostrar_usuarios()
+        elif opcion == "9":
+            prestar_material()
+        elif opcion == "10":
+            mostrar_todos_los_materiales()  
+        elif opcion == "11":
+           devolver_material()
+        elif opcion == "12":
+            historial_prestamos()
+        elif opcion == "13":
+            editar_material()
+        elif opcion == "14":
+            eliminar_material()
+        elif opcion == "0":
+            break
         else:
-            print("Usuario o material no encontrado.")
+            print("❌ Opción inválida.")
 
-    def mostrar_prestamos(self):
-        for prestamo in self.prestamos:
-            prestamo.mostrar_info()
+if __name__ == "__main__":
+    menu()
